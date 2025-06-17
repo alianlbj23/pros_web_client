@@ -18,12 +18,13 @@ class IPInputWindow(QWidget):
         super().__init__()
         self.connected = False
         self.slam_active = False
+        self.loc_active = False
         self.current_ip = ""
         self.init_ui()
 
     def init_ui(self):
         self.setWindowTitle("Server Control Panel")
-        self.setFixedSize(300, 230)
+        self.setFixedSize(300, 260)
 
         # IP input area
         ip_label = QLabel("Server IP:", self)
@@ -42,6 +43,11 @@ class IPInputWindow(QWidget):
         self.btn_slam.clicked.connect(self.on_slam_click)
         self.btn_slam.setVisible(False)
 
+        # Localization button (hidden until connected)
+        self.btn_loc = QPushButton("Localization", self)
+        self.btn_loc.clicked.connect(self.on_loc_click)
+        self.btn_loc.setVisible(False)
+
         # Current IP display
         self.current_ip_label = QLabel("", self)
         self.current_ip_label.setVisible(False)
@@ -51,6 +57,7 @@ class IPInputWindow(QWidget):
         layout.addLayout(ip_layout)
         layout.addWidget(self.btn_connect)
         layout.addWidget(self.btn_slam)
+        layout.addWidget(self.btn_loc)
         layout.addWidget(self.current_ip_label)
         self.setLayout(layout)
 
@@ -65,31 +72,27 @@ class IPInputWindow(QWidget):
             try:
                 resp = requests.get(url, timeout=5)
                 data = resp.json()
-                message = data.get("message", "")
+                msg = data.get("message", "")
                 if (
                     data.get("status") == "Script execution started"
-                    or "already active" in message
+                    or "already active" in msg
                 ):
                     self._set_connected(ip)
-                    QMessageBox.information(
-                        self,
-                        "Info",
-                        (
-                            "Connected and services started."
-                            if data.get("status") == "Script execution started"
-                            else "Already connected."
-                        ),
+                    info = (
+                        "Connected and services started."
+                        if data.get("status") == "Script execution started"
+                        else "Already connected."
                     )
+                    QMessageBox.information(self, "Info", info)
                 else:
-                    QMessageBox.warning(self, "Warning", f"Server error: {message}")
+                    QMessageBox.warning(self, "Warning", f"Server error: {msg}")
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to connect: {e}")
         else:
-            # Immediately update UI and send stop in background
+            # Disconnect UI immediately, send stop in background
+            ip = self.current_ip
             self._set_disconnected()
-            threading.Thread(
-                target=self._send_starcar_stop, args=(self.current_ip,)
-            ).start()
+            threading.Thread(target=self._send_starcar_stop, args=(ip,)).start()
 
     def on_slam_click(self):
         if not self.slam_active:
@@ -103,16 +106,43 @@ class IPInputWindow(QWidget):
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to start slam: {e}")
         else:
-            # immediately send stop and reset UI
             self.slam_active = False
             self.btn_slam.setText("Slam")
             threading.Thread(
                 target=self._send_slam_stop, args=(self.current_ip,)
             ).start()
 
+    def on_loc_click(self):
+        if not self.loc_active:
+            url = f"http://{self.current_ip}:5000/run-script/localization_ydlidar"
+            try:
+                resp = requests.get(url, timeout=5)
+                if resp.json().get("status") == "Script execution started":
+                    self.loc_active = True
+                    self.btn_loc.setText("Close Localization")
+                    QMessageBox.information(self, "Info", "Localization started.")
+            except Exception as e:
+                QMessageBox.critical(
+                    self, "Error", f"Failed to start localization: {e}"
+                )
+        else:
+            self.loc_active = False
+            self.btn_loc.setText("Localization")
+            threading.Thread(
+                target=self._send_loc_stop, args=(self.current_ip,)
+            ).start()
+
     def _send_slam_stop(self, ip: str):
         try:
             requests.get(f"http://{ip}:5000/run-script/slam_ydlidar_stop", timeout=5)
+        except:
+            pass
+
+    def _send_loc_stop(self, ip: str):
+        try:
+            requests.get(
+                f"http://{ip}:5000/run-script/localization_ydlidar_stop", timeout=5
+            )
         except:
             pass
 
@@ -129,18 +159,25 @@ class IPInputWindow(QWidget):
         self.ip_edit.setEnabled(False)
         self.btn_connect.setText("Disconnect")
         self.btn_slam.setVisible(True)
+        self.btn_slam.setText("Slam")
+        self.btn_loc.setVisible(True)
+        self.btn_loc.setText("Localization")
         self.slam_active = False
+        self.loc_active = False
         self.current_ip_label.setText(f"Connected IP: {ip}")
         self.current_ip_label.setVisible(True)
 
     def _set_disconnected(self):
         self.connected = False
         self.slam_active = False
+        self.loc_active = False
         self.ip_edit.clear()
         self.ip_edit.setEnabled(True)
         self.btn_connect.setText("Connect")
         self.btn_slam.setVisible(False)
         self.btn_slam.setText("Slam")
+        self.btn_loc.setVisible(False)
+        self.btn_loc.setText("Localization")
         self.current_ip_label.setVisible(False)
         self.current_ip = ""
 
@@ -152,14 +189,14 @@ class IPInputWindow(QWidget):
         for p in parts:
             if not p.isdigit():
                 return False
-            num = int(p)
-            if num < 0 or num > 255:
+            n = int(p)
+            if n < 0 or n > 255:
                 return False
         return True
 
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    window = IPInputWindow()
-    window.show()
+    w = IPInputWindow()
+    w.show()
     sys.exit(app.exec_())
