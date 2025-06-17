@@ -81,3 +81,6 @@ The application relies on the following Python libraries:
 *   `PyQt5`: For the graphical user interface.
 
 Refer to `requirements.txt` for specific
+
+## Server
+https://github.com/alianlbj23/pros_web_server
