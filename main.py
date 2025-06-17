@@ -48,6 +48,11 @@ class IPInputWindow(QWidget):
         self.btn_loc.clicked.connect(self.on_loc_click)
         self.btn_loc.setVisible(False)
 
+        # Reset button (hidden until connected)
+        self.btn_reset = QPushButton("Reset", self)
+        self.btn_reset.clicked.connect(self.on_reset_click)
+        self.btn_reset.setVisible(False)
+
         # Current IP display
         self.current_ip_label = QLabel("", self)
         self.current_ip_label.setVisible(False)
@@ -58,6 +63,7 @@ class IPInputWindow(QWidget):
         layout.addWidget(self.btn_connect)
         layout.addWidget(self.btn_slam)
         layout.addWidget(self.btn_loc)
+        layout.addWidget(self.btn_reset)
         layout.addWidget(self.current_ip_label)
         self.setLayout(layout)
 
@@ -132,6 +138,16 @@ class IPInputWindow(QWidget):
                 target=self._send_loc_stop, args=(self.current_ip,)
             ).start()
 
+    def on_reset_click(self):
+        # Reset slam and localization states and UI
+        self.slam_active = False
+        self.btn_slam.setText("Slam")
+        self.loc_active = False
+        self.btn_loc.setText("Localization")
+        # Fire stop signals in background
+        threading.Thread(target=self._send_reset, args=(self.current_ip,)).start()
+        QMessageBox.information(self, "Info", "Reset signals sent.")
+
     def _send_slam_stop(self, ip: str):
         try:
             requests.get(f"http://{ip}:5000/run-script/slam_ydlidar_stop", timeout=5)
@@ -152,6 +168,11 @@ class IPInputWindow(QWidget):
         except:
             pass
 
+    def _send_reset(self, ip: str):
+        # Fire both stop signals
+        self._send_slam_stop(ip)
+        self._send_loc_stop(ip)
+
     def _set_connected(self, ip: str):
         self.connected = True
         self.current_ip = ip
@@ -162,6 +183,8 @@ class IPInputWindow(QWidget):
         self.btn_slam.setText("Slam")
         self.btn_loc.setVisible(True)
         self.btn_loc.setText("Localization")
+        self.btn_reset.setVisible(True)
+        self.btn_reset.setText("Reset")
         self.slam_active = False
         self.loc_active = False
         self.current_ip_label.setText(f"Connected IP: {ip}")
@@ -178,6 +201,8 @@ class IPInputWindow(QWidget):
         self.btn_slam.setText("Slam")
         self.btn_loc.setVisible(False)
         self.btn_loc.setText("Localization")
+        self.btn_reset.setVisible(False)
+        self.btn_reset.setText("Reset")
         self.current_ip_label.setVisible(False)
         self.current_ip = ""
 
@@ -197,6 +222,6 @@ class IPInputWindow(QWidget):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    w = IPInputWindow()
-    w.show()
+    window = IPInputWindow()
+    window.show()
     sys.exit(app.exec_())
