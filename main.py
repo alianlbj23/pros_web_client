@@ -108,12 +108,16 @@ class IPInputWindow(QWidget):
                 if resp.json().get("status") == "Script execution started":
                     self.slam_active = True
                     self.btn_slam.setText("Close Slam")
+                    # disable localization button
+                    self.btn_loc.setEnabled(False)
                     QMessageBox.information(self, "Info", "Slam started.")
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to start slam: {e}")
         else:
             self.slam_active = False
             self.btn_slam.setText("Slam")
+            # re-enable localization button
+            self.btn_loc.setEnabled(True)
             threading.Thread(
                 target=self._send_slam_stop, args=(self.current_ip,)
             ).start()
@@ -126,6 +130,8 @@ class IPInputWindow(QWidget):
                 if resp.json().get("status") == "Script execution started":
                     self.loc_active = True
                     self.btn_loc.setText("Close Localization")
+                    # disable slam button
+                    self.btn_slam.setEnabled(False)
                     QMessageBox.information(self, "Info", "Localization started.")
             except Exception as e:
                 QMessageBox.critical(
@@ -134,6 +140,8 @@ class IPInputWindow(QWidget):
         else:
             self.loc_active = False
             self.btn_loc.setText("Localization")
+            # re-enable slam button
+            self.btn_slam.setEnabled(True)
             threading.Thread(
                 target=self._send_loc_stop, args=(self.current_ip,)
             ).start()
@@ -142,8 +150,10 @@ class IPInputWindow(QWidget):
         # Reset slam and localization states and UI
         self.slam_active = False
         self.btn_slam.setText("Slam")
+        self.btn_slam.setEnabled(True)
         self.loc_active = False
         self.btn_loc.setText("Localization")
+        self.btn_loc.setEnabled(True)
         # Fire stop signals in background
         threading.Thread(target=self._send_reset, args=(self.current_ip,)).start()
         QMessageBox.information(self, "Info", "Reset signals sent.")
@@ -180,8 +190,10 @@ class IPInputWindow(QWidget):
         self.ip_edit.setEnabled(False)
         self.btn_connect.setText("Disconnect")
         self.btn_slam.setVisible(True)
+        self.btn_slam.setEnabled(True)
         self.btn_slam.setText("Slam")
         self.btn_loc.setVisible(True)
+        self.btn_loc.setEnabled(True)
         self.btn_loc.setText("Localization")
         self.btn_reset.setVisible(True)
         self.btn_reset.setText("Reset")
