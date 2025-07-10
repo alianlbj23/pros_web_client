@@ -12,7 +12,6 @@ from PyQt5.QtWidgets import (
     QMessageBox,
 )
 
-
 class IPInputWindow(QWidget):
     def __init__(self):
         super().__init__()
@@ -24,7 +23,7 @@ class IPInputWindow(QWidget):
 
     def init_ui(self):
         self.setWindowTitle("Server Control Panel")
-        self.setFixedSize(300, 260)
+        self.setFixedSize(300, 300)  # 調大一點高度
 
         # IP input area
         ip_label = QLabel("Server IP:", self)
@@ -42,6 +41,12 @@ class IPInputWindow(QWidget):
         self.btn_slam = QPushButton("Slam", self)
         self.btn_slam.clicked.connect(self.on_slam_click)
         self.btn_slam.setVisible(False)
+
+        # Store Map button (hidden until connected)
+        self.btn_store_map = QPushButton("Store Map", self)
+        self.btn_store_map.clicked.connect(self.on_store_map_click)
+        self.btn_store_map.setVisible(False)
+        self.btn_store_map.setEnabled(False)
 
         # Localization button (hidden until connected)
         self.btn_loc = QPushButton("Localization", self)
@@ -62,6 +67,7 @@ class IPInputWindow(QWidget):
         layout.addLayout(ip_layout)
         layout.addWidget(self.btn_connect)
         layout.addWidget(self.btn_slam)
+        layout.addWidget(self.btn_store_map)   # 新增 Store Map 按鈕
         layout.addWidget(self.btn_loc)
         layout.addWidget(self.btn_reset)
         layout.addWidget(self.current_ip_label)
@@ -110,6 +116,8 @@ class IPInputWindow(QWidget):
                     self.btn_slam.setText("Close Slam")
                     # disable localization button
                     self.btn_loc.setEnabled(False)
+                    # enable store map button
+                    self.btn_store_map.setEnabled(True)
                     QMessageBox.information(self, "Info", "Slam started.")
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to start slam: {e}")
@@ -118,9 +126,24 @@ class IPInputWindow(QWidget):
             self.btn_slam.setText("Slam")
             # re-enable localization button
             self.btn_loc.setEnabled(True)
+            # disable store map button
+            self.btn_store_map.setEnabled(False)
             threading.Thread(
                 target=self._send_slam_stop, args=(self.current_ip,)
             ).start()
+
+    def on_store_map_click(self):
+        url = f"http://{self.current_ip}:5000/run-script/store_map"
+        try:
+            resp = requests.get(url, timeout=5)
+            data = resp.json()
+            msg = data.get("message", "")
+            if data.get("status") == "Script execution started":
+                QMessageBox.information(self, "Info", "Store Map signal sent.")
+            else:
+                QMessageBox.warning(self, "Warning", f"Server error: {msg}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to store map: {e}")
 
     def on_loc_click(self):
         if not self.loc_active:
@@ -132,6 +155,8 @@ class IPInputWindow(QWidget):
                     self.btn_loc.setText("Close Localization")
                     # disable slam button
                     self.btn_slam.setEnabled(False)
+                    # disable store map button
+                    self.btn_store_map.setEnabled(False)
                     QMessageBox.information(self, "Info", "Localization started.")
             except Exception as e:
                 QMessageBox.critical(
@@ -142,6 +167,8 @@ class IPInputWindow(QWidget):
             self.btn_loc.setText("Localization")
             # re-enable slam button
             self.btn_slam.setEnabled(True)
+            # 根據 slam_active 狀態判斷 store_map
+            self.btn_store_map.setEnabled(self.slam_active)
             threading.Thread(
                 target=self._send_loc_stop, args=(self.current_ip,)
             ).start()
@@ -154,6 +181,7 @@ class IPInputWindow(QWidget):
         self.loc_active = False
         self.btn_loc.setText("Localization")
         self.btn_loc.setEnabled(True)
+        self.btn_store_map.setEnabled(False)
         # Fire stop signals in background
         threading.Thread(target=self._send_reset, args=(self.current_ip,)).start()
         QMessageBox.information(self, "Info", "Reset signals sent.")
@@ -192,6 +220,8 @@ class IPInputWindow(QWidget):
         self.btn_slam.setVisible(True)
         self.btn_slam.setEnabled(True)
         self.btn_slam.setText("Slam")
+        self.btn_store_map.setVisible(True)
+        self.btn_store_map.setEnabled(False)
         self.btn_loc.setVisible(True)
         self.btn_loc.setEnabled(True)
         self.btn_loc.setText("Localization")
@@ -211,6 +241,8 @@ class IPInputWindow(QWidget):
         self.btn_connect.setText("Connect")
         self.btn_slam.setVisible(False)
         self.btn_slam.setText("Slam")
+        self.btn_store_map.setVisible(False)
+        self.btn_store_map.setEnabled(False)
         self.btn_loc.setVisible(False)
         self.btn_loc.setText("Localization")
         self.btn_reset.setVisible(False)
@@ -230,7 +262,6 @@ class IPInputWindow(QWidget):
             if n < 0 or n > 255:
                 return False
         return True
-
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
