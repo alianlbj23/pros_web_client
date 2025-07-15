@@ -11,6 +11,7 @@ from PyQt5.QtWidgets import (
     QHBoxLayout,
     QMessageBox,
 )
+from PyQt5.QtCore import Qt  # 引入 Qt 模塊
 
 class IPInputWindow(QWidget):
     def __init__(self):
@@ -32,6 +33,14 @@ class IPInputWindow(QWidget):
         ip_layout = QHBoxLayout()
         ip_layout.addWidget(ip_label)
         ip_layout.addWidget(self.ip_edit)
+
+        # Port input area
+        port_label = QLabel("Port:", self)
+        self.port_edit = QLineEdit(self)
+        self.port_edit.setPlaceholderText("5000")  # 默認顯示 5000
+        port_layout = QHBoxLayout()
+        port_layout.addWidget(port_label)
+        port_layout.addWidget(self.port_edit)
 
         # Connect/Disconnect button
         self.btn_connect = QPushButton("Connect", self)
@@ -62,25 +71,52 @@ class IPInputWindow(QWidget):
         self.current_ip_label = QLabel("", self)
         self.current_ip_label.setVisible(False)
 
+        # Add a label to display pressed keys
+        self.key_label = QLabel("Press a key", self)  # Add this line
+        self.key_label.setAlignment(Qt.AlignCenter)  # Center text alignment
+        self.key_label.setStyleSheet("font-size: 18px;")
+
         # Layout
         layout = QVBoxLayout()
         layout.addLayout(ip_layout)
+        layout.addLayout(port_layout)  # 新增端口區域
         layout.addWidget(self.btn_connect)
         layout.addWidget(self.btn_slam)
         layout.addWidget(self.btn_store_map)   # 新增 Store Map 按鈕
         layout.addWidget(self.btn_loc)
         layout.addWidget(self.btn_reset)
         layout.addWidget(self.current_ip_label)
+        layout.addWidget(self.key_label)  # Add the key label to the layout
         self.setLayout(layout)
+
+    def keyPressEvent(self, event):
+        # Only process key press events if connected
+        if self.connected:
+            # Capture the key that was pressed
+            key = event.text()
+            if key:  # If the key is not an empty string
+                self.key_label.setText(f"Key Pressed: {key}")
 
     def on_connect_click(self):
         ip = self.ip_edit.text().strip()
+        port = self.port_edit.text().strip()
+
         if not self.validate_ip(ip):
             QMessageBox.warning(self, "Warning", "Invalid IP format.")
             return
 
+        # 如果端口為空，使用默認值 5000
+        if not port:
+            port = 5000
+        else:
+            try:
+                port = int(port)
+            except ValueError:
+                QMessageBox.warning(self, "Warning", "Invalid port format.")
+                return
+
         if not self.connected:
-            url = f"http://{ip}:5000/run-script/star_car"
+            url = f"http://{ip}:{port}/run-script/star_car"
             try:
                 resp = requests.get(url, timeout=5)
                 data = resp.json()
@@ -89,7 +125,7 @@ class IPInputWindow(QWidget):
                     data.get("status") == "Script execution started"
                     or "already active" in msg
                 ):
-                    self._set_connected(ip)
+                    self._set_connected(ip, port)
                     info = (
                         "Connected and services started."
                         if data.get("status") == "Script execution started"
@@ -211,11 +247,14 @@ class IPInputWindow(QWidget):
         self._send_slam_stop(ip)
         self._send_loc_stop(ip)
 
-    def _set_connected(self, ip: str):
+    def _set_connected(self, ip: str, port: int):
         self.connected = True
         self.current_ip = ip
+        self.current_port = port
         self.ip_edit.setText(ip)
+        self.port_edit.setText(str(port))  # 顯示當前的端口
         self.ip_edit.setEnabled(False)
+        self.port_edit.setEnabled(False)  # 禁用端口輸入框
         self.btn_connect.setText("Disconnect")
         self.btn_slam.setVisible(True)
         self.btn_slam.setEnabled(True)
@@ -237,7 +276,9 @@ class IPInputWindow(QWidget):
         self.slam_active = False
         self.loc_active = False
         self.ip_edit.clear()
+        self.port_edit.clear()
         self.ip_edit.setEnabled(True)
+        self.port_edit.setEnabled(True)  # 重新啟用端口輸入框
         self.btn_connect.setText("Connect")
         self.btn_slam.setVisible(False)
         self.btn_slam.setText("Slam")
