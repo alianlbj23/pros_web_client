@@ -22,7 +22,7 @@ class IPInputWindow(QWidget):
         self.loc_active = False
         self.current_ip = ""
         self.current_port = 5000        # 預設 port
-        self.selected_lidar = "lidar"  # 預設選擇 "lidar"
+        self.selected_lidar = "ydlidar"  # 預設選擇 "lidar"
         self.init_ui()
 
     def init_ui(self):
@@ -52,7 +52,7 @@ class IPInputWindow(QWidget):
         # LIDAR selection (ComboBox)
         lidar_label = QLabel("Select LIDAR:", self)
         self.lidar_combo = QComboBox(self)
-        self.lidar_combo.addItems(["lidar", "ydlidar", "oradarlidar"])
+        self.lidar_combo.addItems(["ydlidar", "oradarlidar"])
         self.lidar_combo.currentIndexChanged.connect(self.update_lidar_selection)
 
         # Slam button
@@ -230,6 +230,21 @@ class IPInputWindow(QWidget):
         ip0, port0 = self.current_ip, self.current_port
         threading.Thread(target=self._send_slam_stop, args=(ip0, port0)).start()
         threading.Thread(target=self._send_loc_stop, args=(ip0, port0)).start()
+        # 重新發送 star_car 請求以重啟服務
+        # 直接發送 star_car 請求，而不觸發其他狀態改變
+        url = f"http://{ip0}:{port0}/run-script/star_car"
+        try:
+            resp = requests.get(url, timeout=5)
+            data = resp.json()
+            msg = data.get("message", "")
+            if data.get("status") == "Script execution started" or "already active" in msg:
+                QMessageBox.information(self, "Info", "Service restarted successfully.")
+            else:
+                QMessageBox.warning(self, "Warning", f"Server error: {msg}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to restart service: {e}")
+
+        # 保持畫面原來的狀態
         QMessageBox.information(self, "Info", "Reset signals sent.")
 
     # -- stop functions 都帶入 port --
