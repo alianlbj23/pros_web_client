@@ -10,6 +10,7 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
     QHBoxLayout,
     QMessageBox,
+    QComboBox
 )
 from PyQt5.QtCore import Qt  # 引入 Qt 模塊
 
@@ -20,11 +21,13 @@ class IPInputWindow(QWidget):
         self.slam_active = False
         self.loc_active = False
         self.current_ip = ""
+        self.current_port = 5000        # 預設 port
+        self.selected_lidar = "lidar"  # 預設選擇 "lidar"
         self.init_ui()
 
     def init_ui(self):
         self.setWindowTitle("Server Control Panel")
-        self.setFixedSize(300, 300)  # 調大一點高度
+        self.setFixedSize(300, 400)
 
         # IP input area
         ip_label = QLabel("Server IP:", self)
@@ -37,7 +40,7 @@ class IPInputWindow(QWidget):
         # Port input area
         port_label = QLabel("Port:", self)
         self.port_edit = QLineEdit(self)
-        self.port_edit.setPlaceholderText("5000")  # 默認顯示 5000
+        self.port_edit.setPlaceholderText("5000")
         port_layout = QHBoxLayout()
         port_layout.addWidget(port_label)
         port_layout.addWidget(self.port_edit)
@@ -46,113 +49,126 @@ class IPInputWindow(QWidget):
         self.btn_connect = QPushButton("Connect", self)
         self.btn_connect.clicked.connect(self.on_connect_click)
 
-        # Slam button (hidden until connected)
+        # LIDAR selection (ComboBox)
+        lidar_label = QLabel("Select LIDAR:", self)
+        self.lidar_combo = QComboBox(self)
+        self.lidar_combo.addItems(["lidar", "ydlidar", "oradarlidar"])
+        self.lidar_combo.currentIndexChanged.connect(self.update_lidar_selection)
+
+        # Slam button
         self.btn_slam = QPushButton("Slam", self)
         self.btn_slam.clicked.connect(self.on_slam_click)
         self.btn_slam.setVisible(False)
 
-        # Store Map button (hidden until connected)
+        # Store Map button
         self.btn_store_map = QPushButton("Store Map", self)
         self.btn_store_map.clicked.connect(self.on_store_map_click)
         self.btn_store_map.setVisible(False)
         self.btn_store_map.setEnabled(False)
 
-        # Localization button (hidden until connected)
+        # Localization button
         self.btn_loc = QPushButton("Localization", self)
         self.btn_loc.clicked.connect(self.on_loc_click)
         self.btn_loc.setVisible(False)
 
-        # Reset button (hidden until connected)
+        # Reset button
         self.btn_reset = QPushButton("Reset", self)
         self.btn_reset.clicked.connect(self.on_reset_click)
         self.btn_reset.setVisible(False)
 
-        # Current IP display
+        # Current IP label
         self.current_ip_label = QLabel("", self)
         self.current_ip_label.setVisible(False)
 
-        # Add a label to display pressed keys
-        self.key_label = QLabel("Press a key", self)  # Add this line
-        self.key_label.setAlignment(Qt.AlignCenter)  # Center text alignment
+        # Key display
+        self.key_label = QLabel("Press a key", self)
+        self.key_label.setAlignment(Qt.AlignCenter)
         self.key_label.setStyleSheet("font-size: 18px;")
 
         # Layout
         layout = QVBoxLayout()
         layout.addLayout(ip_layout)
-        layout.addLayout(port_layout)  # 新增端口區域
+        layout.addLayout(port_layout)
         layout.addWidget(self.btn_connect)
+        layout.addWidget(lidar_label)
+        layout.addWidget(self.lidar_combo)  # Add the lidar combo box here
         layout.addWidget(self.btn_slam)
-        layout.addWidget(self.btn_store_map)   # 新增 Store Map 按鈕
+        layout.addWidget(self.btn_store_map)
         layout.addWidget(self.btn_loc)
         layout.addWidget(self.btn_reset)
         layout.addWidget(self.current_ip_label)
-        layout.addWidget(self.key_label)  # Add the key label to the layout
+        layout.addWidget(self.key_label)
         self.setLayout(layout)
 
     def keyPressEvent(self, event):
-        # Only process key press events if connected
         if self.connected:
-            # Capture the key that was pressed
             key = event.text()
-            if key:  # If the key is not an empty string
+            if key:
                 self.key_label.setText(f"Key Pressed: {key}")
+
+    def update_lidar_selection(self):
+        """
+        Update the selected LIDAR type based on the combo box selection.
+        """
+        self.selected_lidar = self.lidar_combo.currentText()
 
     def on_connect_click(self):
         ip = self.ip_edit.text().strip()
-        port = self.port_edit.text().strip()
+        port_text = self.port_edit.text().strip()
 
         if not self.validate_ip(ip):
             QMessageBox.warning(self, "Warning", "Invalid IP format.")
             return
 
-        # 如果端口為空，使用默認值 5000
-        if not port:
+        # 只有沒輸入才給預設
+        if not port_text:
             port = 5000
         else:
             try:
-                port = int(port)
+                port = int(port_text)
             except ValueError:
                 QMessageBox.warning(self, "Warning", "Invalid port format.")
                 return
 
         if not self.connected:
+            # 根據 selected_lidar 動態修改 URL
             url = f"http://{ip}:{port}/run-script/star_car"
             try:
                 resp = requests.get(url, timeout=5)
                 data = resp.json()
                 msg = data.get("message", "")
-                if (
-                    data.get("status") == "Script execution started"
-                    or "already active" in msg
-                ):
+                if data.get("status") == "Script execution started" or "already active" in msg or "Containers for 'star_car' already running" in msg:
+                    # 如果 LIDAR 已經在跑，顯示訊息並進入選單
+                    if "already active" in msg or "Containers for 'star_car' already running" in msg:
+                        QMessageBox.information(self, "Info", "Service is already running.")
+                    # 連線成功，記下 IP & port
                     self._set_connected(ip, port)
-                    info = (
-                        "Connected and services started."
-                        if data.get("status") == "Script execution started"
-                        else "Already connected."
-                    )
+                    info = ("Connected and services started."
+                            if data.get("status") == "Script execution started"
+                            else "Already connected.")
                     QMessageBox.information(self, "Info", info)
+                    # 顯示 LIDAR 選擇框
+                    self.lidar_combo.setVisible(True)
                 else:
                     QMessageBox.warning(self, "Warning", f"Server error: {msg}")
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to connect: {e}")
         else:
-            # Disconnect UI immediately, send stop in background
-            ip = self.current_ip
+            # Disconnect
+            ip0, port0 = self.current_ip, self.current_port
             self._set_disconnected()
-            threading.Thread(target=self._send_starcar_stop, args=(ip,)).start()
+            threading.Thread(target=self._send_starcar_stop, args=(ip0, port0)).start()
 
     def on_slam_click(self):
         if not self.slam_active:
-            url = f"http://{self.current_ip}:5000/run-script/slam_ydlidar"
+            # 根據 selected_lidar 動態修改 URL
+            url = f"http://{self.current_ip}:{self.current_port}/run-script/slam_{self.selected_lidar}"
             try:
                 resp = requests.get(url, timeout=5)
                 if resp.json().get("status") == "Script execution started":
                     self.slam_active = True
                     self.btn_slam.setText("Close Slam")
-                    # disable localization button
                     self.btn_loc.setEnabled(False)
-                    # enable store map button
                     self.btn_store_map.setEnabled(True)
                     QMessageBox.information(self, "Info", "Slam started.")
             except Exception as e:
@@ -160,16 +176,14 @@ class IPInputWindow(QWidget):
         else:
             self.slam_active = False
             self.btn_slam.setText("Slam")
-            # re-enable localization button
             self.btn_loc.setEnabled(True)
-            # disable store map button
             self.btn_store_map.setEnabled(False)
             threading.Thread(
-                target=self._send_slam_stop, args=(self.current_ip,)
+                target=self._send_slam_stop, args=(self.current_ip, self.current_port)
             ).start()
 
     def on_store_map_click(self):
-        url = f"http://{self.current_ip}:5000/run-script/store_map"
+        url = f"http://{self.current_ip}:{self.current_port}/run-script/store_map"
         try:
             resp = requests.get(url, timeout=5)
             data = resp.json()
@@ -183,34 +197,28 @@ class IPInputWindow(QWidget):
 
     def on_loc_click(self):
         if not self.loc_active:
-            url = f"http://{self.current_ip}:5000/run-script/localization_ydlidar"
+            # 根據 selected_lidar 動態修改 URL
+            url = f"http://{self.current_ip}:{self.current_port}/run-script/localization_{self.selected_lidar}"
             try:
                 resp = requests.get(url, timeout=5)
                 if resp.json().get("status") == "Script execution started":
                     self.loc_active = True
                     self.btn_loc.setText("Close Localization")
-                    # disable slam button
                     self.btn_slam.setEnabled(False)
-                    # disable store map button
                     self.btn_store_map.setEnabled(False)
                     QMessageBox.information(self, "Info", "Localization started.")
             except Exception as e:
-                QMessageBox.critical(
-                    self, "Error", f"Failed to start localization: {e}"
-                )
+                QMessageBox.critical(self, "Error", f"Failed to start localization: {e}")
         else:
             self.loc_active = False
             self.btn_loc.setText("Localization")
-            # re-enable slam button
             self.btn_slam.setEnabled(True)
-            # 根據 slam_active 狀態判斷 store_map
             self.btn_store_map.setEnabled(self.slam_active)
             threading.Thread(
-                target=self._send_loc_stop, args=(self.current_ip,)
+                target=self._send_loc_stop, args=(self.current_ip, self.current_port)
             ).start()
 
     def on_reset_click(self):
-        # Reset slam and localization states and UI
         self.slam_active = False
         self.btn_slam.setText("Slam")
         self.btn_slam.setEnabled(True)
@@ -218,43 +226,40 @@ class IPInputWindow(QWidget):
         self.btn_loc.setText("Localization")
         self.btn_loc.setEnabled(True)
         self.btn_store_map.setEnabled(False)
-        # Fire stop signals in background
-        threading.Thread(target=self._send_reset, args=(self.current_ip,)).start()
+        # stop slam & loc
+        ip0, port0 = self.current_ip, self.current_port
+        threading.Thread(target=self._send_slam_stop, args=(ip0, port0)).start()
+        threading.Thread(target=self._send_loc_stop, args=(ip0, port0)).start()
         QMessageBox.information(self, "Info", "Reset signals sent.")
 
-    def _send_slam_stop(self, ip: str):
+    # -- stop functions 都帶入 port --
+    def _send_slam_stop(self, ip: str, port: int):
         try:
-            requests.get(f"http://{ip}:5000/run-script/slam_ydlidar_stop", timeout=5)
+            requests.get(f"http://{ip}:{port}/run-script/slam_{self.selected_lidar}_stop", timeout=5)
         except:
             pass
 
-    def _send_loc_stop(self, ip: str):
+    def _send_loc_stop(self, ip: str, port: int):
         try:
-            requests.get(
-                f"http://{ip}:5000/run-script/localization_ydlidar_stop", timeout=5
-            )
+            requests.get(f"http://{ip}:{port}/run-script/localization_{self.selected_lidar}_stop", timeout=5)
         except:
             pass
 
-    def _send_starcar_stop(self, ip: str):
+    def _send_starcar_stop(self, ip: str, port: int):
         try:
-            requests.get(f"http://{ip}:5000/run-script/star_car_stop", timeout=5)
+            requests.get(f"http://{ip}:{port}/run-script/star_car_stop", timeout=5)
         except:
             pass
 
-    def _send_reset(self, ip: str):
-        # Fire both stop signals
-        self._send_slam_stop(ip)
-        self._send_loc_stop(ip)
-
+    # UI 更新並記錄 port
     def _set_connected(self, ip: str, port: int):
         self.connected = True
         self.current_ip = ip
         self.current_port = port
         self.ip_edit.setText(ip)
-        self.port_edit.setText(str(port))  # 顯示當前的端口
+        self.port_edit.setText(str(port))
         self.ip_edit.setEnabled(False)
-        self.port_edit.setEnabled(False)  # 禁用端口輸入框
+        self.port_edit.setEnabled(False)
         self.btn_connect.setText("Disconnect")
         self.btn_slam.setVisible(True)
         self.btn_slam.setEnabled(True)
@@ -266,8 +271,6 @@ class IPInputWindow(QWidget):
         self.btn_loc.setText("Localization")
         self.btn_reset.setVisible(True)
         self.btn_reset.setText("Reset")
-        self.slam_active = False
-        self.loc_active = False
         self.current_ip_label.setText(f"Connected IP: {ip}")
         self.current_ip_label.setVisible(True)
 
@@ -278,7 +281,7 @@ class IPInputWindow(QWidget):
         self.ip_edit.clear()
         self.port_edit.clear()
         self.ip_edit.setEnabled(True)
-        self.port_edit.setEnabled(True)  # 重新啟用端口輸入框
+        self.port_edit.setEnabled(True)
         self.btn_connect.setText("Connect")
         self.btn_slam.setVisible(False)
         self.btn_slam.setText("Slam")
