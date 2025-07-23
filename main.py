@@ -16,6 +16,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt  # 引入 Qt 模塊
 import yaml
+from PyQt5.QtWidgets import QScrollArea
 
 
 class IPInputWindow(QWidget):
@@ -66,7 +67,7 @@ class IPInputWindow(QWidget):
 
     def init_ui(self):
         self.setWindowTitle("Server Control Panel")
-        self.setFixedSize(300, 400)
+        self.setFixedSize(600, 600)
 
         # IP input area
         ip_label = QLabel("Server IP:", self)
@@ -144,11 +145,17 @@ class IPInputWindow(QWidget):
 
         self.btn_reset_joints = QPushButton("Reset Joints", self)
         self.btn_reset_joints.clicked.connect(self.reset_all_joint_sliders)
+        self.btn_reset_joints.setVisible(False)  # 初始為隱藏
         layout.addWidget(self.btn_reset_joints)
 
         self.form_layout_widget = QWidget()
         form_layout = QFormLayout()
         self.form_layout_widget.setLayout(form_layout)
+
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setWidget(self.form_layout_widget)
+
         self.joint_labels = {}  # key: joint_name, value: QLabel
 
         for joint_name, limits in self.joint_limits.items():
@@ -180,7 +187,8 @@ class IPInputWindow(QWidget):
         layout.addLayout(form_layout)
         self.setLayout(layout)
         self.form_layout_widget.setVisible(False)
-        layout.addWidget(self.form_layout_widget)
+        layout.addWidget(self.scroll_area)
+        layout.addWidget(self.btn_reset_joints)
 
     def keyPressEvent(self, event):
         if self.connected:
@@ -413,6 +421,7 @@ class IPInputWindow(QWidget):
         self.lidar_combo.setVisible(True)
         self.lidar_label.setVisible(True)
         self.form_layout_widget.setVisible(True)
+        self.btn_reset_joints.setVisible(True)
 
     def _set_disconnected(self):
         self.connected = False
@@ -433,6 +442,7 @@ class IPInputWindow(QWidget):
         self.btn_reset.setText("Reset")
         self.current_ip_label.setVisible(False)
         self.current_ip = ""
+        self.btn_reset_joints.setVisible(False)
 
     @staticmethod
     def validate_ip(ip: str) -> bool:
