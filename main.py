@@ -11,6 +11,8 @@ from PyQt5.QtWidgets import (
     QHBoxLayout,
     QMessageBox,
     QComboBox,
+    QSlider,
+    QFormLayout,
 )
 from PyQt5.QtCore import Qt  # 引入 Qt 模塊
 import yaml
@@ -25,9 +27,42 @@ class IPInputWindow(QWidget):
         self.current_ip = ""
         self.current_port = 5000  # 預設 port
         self.selected_lidar = "ydlidar"  # 預設選擇 "lidar"
-        self.init_ui()
+
+        # ✅ 初始化 YAML 中的 key_map 和 joint_limits
         with open("keyboard.yaml", "r") as f:
-            self.key_map = yaml.safe_load(f).get("key_mappings", {})
+            config = yaml.safe_load(f)
+            self.key_map = config.get("key_mappings", {})
+            self.joint_limits = config.get("arm_joint_limits", {})
+
+        self.joint_sliders = {}  # key: joint_name, value: slider
+
+        # ✅ 最後再初始化 UI（要用到 joint_limits）
+        self.init_ui()
+
+    def send_joint_command(self):
+        if not self.connected:
+            return
+
+        # 依照順序取得每個關節的當前值
+        joint_values = []
+        for joint in sorted(self.joint_sliders.keys()):  # 保持順序一致
+            val = self.joint_sliders[joint].value()
+            joint_values.append(val)
+
+        angle_str = "_".join(map(str, joint_values))
+        url = f"http://{self.current_ip}:{self.current_port}/robot_arm/{angle_str}"
+        threading.Thread(target=self.send_wheel_command, args=(url,)).start()
+
+    def on_joint_slider_changed(self, joint_name):
+        value = self.joint_sliders[joint_name].value()
+        self.joint_labels[joint_name].setText(str(value))
+        self.send_joint_command()
+
+    def reset_all_joint_sliders(self):
+        for joint_name, slider in self.joint_sliders.items():
+            default_val = self.joint_limits[joint_name].get("default", 0)
+            slider.setValue(default_val)
+            self.joint_labels[joint_name].setText(str(default_val))
 
     def init_ui(self):
         self.setWindowTitle("Server Control Panel")
@@ -58,6 +93,10 @@ class IPInputWindow(QWidget):
         self.lidar_combo = QComboBox(self)
         self.lidar_combo.addItems(["ydlidar", "oradarlidar"])
         self.lidar_combo.currentIndexChanged.connect(self.update_lidar_selection)
+        self.lidar_combo.setVisible(False)  # 隱藏 LIDAR 下拉選單
+        lidar_label.setVisible(False)  # 隱藏 Label
+
+        self.lidar_label = lidar_label  # 保留指標方便後面控制可見性
 
         # Slam button
         self.btn_slam = QPushButton("Slam", self)
@@ -102,7 +141,46 @@ class IPInputWindow(QWidget):
         layout.addWidget(self.btn_reset)
         layout.addWidget(self.current_ip_label)
         layout.addWidget(self.key_label)
+
+        self.btn_reset_joints = QPushButton("Reset Joints", self)
+        self.btn_reset_joints.clicked.connect(self.reset_all_joint_sliders)
+        layout.addWidget(self.btn_reset_joints)
+
+        self.form_layout_widget = QWidget()
+        form_layout = QFormLayout()
+        self.form_layout_widget.setLayout(form_layout)
+        self.joint_labels = {}  # key: joint_name, value: QLabel
+
+        for joint_name, limits in self.joint_limits.items():
+            slider = QSlider(Qt.Horizontal)
+            slider.setMinimum(limits["min"])
+            slider.setMaximum(limits["max"])
+            slider.setValue(limits.get("default", (limits["min"] + limits["max"]) // 2))
+
+            label = QLabel(str(slider.value()))
+            self.joint_labels[joint_name] = label
+
+            # 包成一個水平區塊（slider + label）
+            h_layout = QHBoxLayout()
+            h_layout.addWidget(slider)
+            h_layout.addWidget(label)
+
+            slider.valueChanged.connect(
+                lambda _, name=joint_name: self.on_joint_slider_changed(name)
+            )
+
+            slider.valueChanged.connect(
+                lambda _, name=joint_name: self.on_joint_slider_changed(name)
+            )
+            self.joint_sliders[joint_name] = slider
+            form_layout.addRow(
+                f"{joint_name} ({limits['min']}~{limits['max']})", h_layout
+            )
+
+        layout.addLayout(form_layout)
         self.setLayout(layout)
+        self.form_layout_widget.setVisible(False)
+        layout.addWidget(self.form_layout_widget)
 
     def keyPressEvent(self, event):
         if self.connected:
@@ -332,6 +410,9 @@ class IPInputWindow(QWidget):
         self.btn_reset.setText("Reset")
         self.current_ip_label.setText(f"Connected IP: {ip}")
         self.current_ip_label.setVisible(True)
+        self.lidar_combo.setVisible(True)
+        self.lidar_label.setVisible(True)
+        self.form_layout_widget.setVisible(True)
 
     def _set_disconnected(self):
         self.connected = False

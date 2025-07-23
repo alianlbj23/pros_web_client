@@ -4,3 +4,29 @@ key_mappings:
   a: [-1, 1, -1, 1]
   d: [1, -1, 1, -1]
   q: [0, 0, 0, 0]
+
+arm_joint_limits:
+  joint_1:
+    default: 90
+    min: 0
+    max: 180
+  joint_2:
+    default: 90
+    min: 0
+    max: 90
+  joint_3:
+    default: 90
+    min: 0
+    max: 150
+  joint_4:
+    default: 90
+    min: 0
+    max: 45
+  joint_5:
+    default: 90
+    min: 0
+    max: 180
+  joint_6:
+    default: 90
+    min: -90
+    max: 90
