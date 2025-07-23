@@ -17,6 +17,8 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt  # 引入 Qt 模塊
 import yaml
 from PyQt5.QtWidgets import QScrollArea
+import roslibpy  # ← 新增
+import math
 
 
 class IPInputWindow(QWidget):
@@ -28,6 +30,7 @@ class IPInputWindow(QWidget):
         self.current_ip = ""
         self.current_port = 5000  # 預設 port
         self.selected_lidar = "ydlidar"  # 預設選擇 "lidar"
+        self.wheel_pub = None  # roslibpy.Topic for wheel
 
         # ✅ 初始化 YAML 中的 key_map 和 joint_limits
         with open("keyboard.yaml", "r") as f:
@@ -40,19 +43,104 @@ class IPInputWindow(QWidget):
         # ✅ 最後再初始化 UI（要用到 joint_limits）
         self.init_ui()
 
+        self.ros = None  # roslibpy.Ros 物件
+        self.rosbridge_port = 9090  # 可改成你需要的 port
+        self.arm_pub = None  # roslibpy.Topic for arm joints
+
+    def _connect_rosbridge(self, ip: str, port: int = 9090, timeout: int = 5):
+        ros = roslibpy.Ros(host=ip, port=port)
+        try:
+            ros.run(timeout=timeout)
+            if ros.is_connected:
+                self.ros = ros
+
+                # wheel publisher
+                self.wheel_pub = roslibpy.Topic(
+                    self.ros, "/car_C_rear_wheel", "std_msgs/Float32MultiArray"
+                )
+                self.wheel_pub.advertise()
+
+                # ★ arm publisher
+                self.arm_pub = roslibpy.Topic(
+                    self.ros, "/robot_arm", "trajectory_msgs/JointTrajectoryPoint"
+                )
+                self.arm_pub.advertise()
+
+                return True, ""
+            else:
+                return False, "roslibpy connected=False"
+        except Exception as e:
+            return False, str(e)
+
+    def _disconnect_rosbridge(self):
+        if self.wheel_pub:
+            try:
+                self.wheel_pub.unadvertise()
+            except:
+                pass
+            self.wheel_pub = None
+
+        if self.arm_pub:
+            try:
+                self.arm_pub.unadvertise()
+            except:
+                pass
+            self.arm_pub = None
+
+        if self.ros and self.ros.is_connected:
+            try:
+                self.ros.terminate()
+            except:
+                pass
+        self.ros = None
+
+    def publish_robot_arm(self, joint_values):
+        """
+        joint_values: list[float] 依序為各關節角度
+        trajectory_msgs/JointTrajectoryPoint:
+        float64[] positions
+        float64[] velocities
+        float64[] accelerations
+        float64[] effort
+        duration  time_from_start
+        """
+        if not (self.ros and self.ros.is_connected and self.arm_pub):
+            print("[WARN] ROS not connected, skip robot_arm publish.")
+            return
+
+        msg = roslibpy.Message(
+            {
+                "positions": list(map(float, joint_values)),
+                "velocities": [],
+                "accelerations": [],
+                "effort": [],
+                "time_from_start": {"secs": 0, "nsecs": 0},
+            }
+        )
+        self.arm_pub.publish(msg)
+
+    def publish_wheel_speed(self, speeds):
+        """speeds: list[float or int]"""
+        if not (self.ros and self.ros.is_connected and self.wheel_pub):
+            print("[WARN] ROS not connected, skip publish.")
+            return
+        msg = roslibpy.Message(
+            {"layout": {"dim": [], "data_offset": 0}, "data": list(map(float, speeds))}
+        )
+        self.wheel_pub.publish(msg)
+
     def send_joint_command(self):
         if not self.connected:
             return
 
-        # 依照順序取得每個關節的當前值
         joint_values = []
         for joint in sorted(self.joint_sliders.keys()):  # 保持順序一致
-            val = self.joint_sliders[joint].value()
-            joint_values.append(val)
-
-        angle_str = "_".join(map(str, joint_values))
-        url = f"http://{self.current_ip}:{self.current_port}/robot_arm/{angle_str}"
-        threading.Thread(target=self.send_wheel_command, args=(url,)).start()
+            joint_values.append(self.joint_sliders[joint].value())
+        joint_values_deg = [
+            self.joint_sliders[j].value() for j in sorted(self.joint_sliders.keys())
+        ]
+        joint_values_rad = [math.radians(v) for v in joint_values_deg]
+        self.publish_robot_arm(joint_values_rad)
 
     def on_joint_slider_changed(self, joint_name):
         value = self.joint_sliders[joint_name].value()
@@ -195,14 +283,10 @@ class IPInputWindow(QWidget):
             key = event.text()
             if key:
                 self.key_label.setText(f"Key Pressed: {key}")
-                # 查找對應的輪速指令
                 if key in self.key_map:
-                    wheel_speed = self.key_map[key]
-                    wheel_str = "_".join(map(str, wheel_speed))
-                    url = f"http://{self.current_ip}:{self.current_port}/wheel/{wheel_str}"
-                    threading.Thread(
-                        target=self.send_wheel_command, args=(url,)
-                    ).start()
+                    wheel_speed = self.key_map[key]  # list
+                    # ★ 用 roslibpy 發
+                    self.publish_wheel_speed(wheel_speed)
                 else:
                     self.key_label.setText(f"Key '{key}' not mapped.")
 
@@ -228,7 +312,7 @@ class IPInputWindow(QWidget):
             QMessageBox.warning(self, "Warning", "Invalid IP format.")
             return
 
-        # 只有沒輸入才給預設
+        # Port 預設 5000
         if not port_text:
             port = 5000
         else:
@@ -238,44 +322,62 @@ class IPInputWindow(QWidget):
                 QMessageBox.warning(self, "Warning", "Invalid port format.")
                 return
 
+        # －－－－－－－－ Connect 邏輯 －－－－－－－－#
         if not self.connected:
-            # 根據 selected_lidar 動態修改 URL
             url = f"http://{ip}:{port}/run-script/star_car"
             try:
                 resp = requests.get(url, timeout=5)
                 data = resp.json()
                 msg = data.get("message", "")
+
                 if (
                     data.get("status") == "Script execution started"
                     or "already active" in msg
                     or "Containers for 'star_car' already running" in msg
                 ):
-                    # 如果 LIDAR 已經在跑，顯示訊息並進入選單
-                    if (
-                        "already active" in msg
-                        or "Containers for 'star_car' already running" in msg
-                    ):
-                        QMessageBox.information(
-                            self, "Info", "Service is already running."
-                        )
-                    # 連線成功，記下 IP & port
+                    # 設定已連線狀態
                     self._set_connected(ip, port)
+
+                    # 嘗試連 rosbridge
+                    ok, err = self._connect_rosbridge(
+                        ip, self.rosbridge_port, timeout=5
+                    )
+                    if ok:
+                        QMessageBox.information(
+                            self,
+                            "ROSBridge",
+                            f"Connected to ws://{ip}:{self.rosbridge_port}",
+                        )
+                    else:
+                        QMessageBox.warning(
+                            self,
+                            "ROSBridge",
+                            f"ROSBridge connect failed: {err}",
+                        )
+
                     info = (
                         "Connected and services started."
                         if data.get("status") == "Script execution started"
                         else "Already connected."
                     )
                     QMessageBox.information(self, "Info", info)
-                    # 顯示 LIDAR 選擇框
+
+                    # 顯示 LIDAR 選擇
                     self.lidar_combo.setVisible(True)
+                    self.lidar_label.setVisible(True)
+
                 else:
                     QMessageBox.warning(self, "Warning", f"Server error: {msg}")
+
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to connect: {e}")
+
+        # －－－－－－－－ Disconnect 邏輯 －－－－－－－－#
         else:
-            # Disconnect
             ip0, port0 = self.current_ip, self.current_port
+            # 先更新 UI 狀態
             self._set_disconnected()
+            # 發出 stop
             threading.Thread(target=self._send_starcar_stop, args=(ip0, port0)).start()
 
     def on_slam_click(self):
@@ -443,6 +545,7 @@ class IPInputWindow(QWidget):
         self.current_ip_label.setVisible(False)
         self.current_ip = ""
         self.btn_reset_joints.setVisible(False)
+        self._disconnect_rosbridge()
 
     @staticmethod
     def validate_ip(ip: str) -> bool:

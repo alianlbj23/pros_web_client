@@ -1,6 +1,6 @@
 key_mappings:
-  w: [1, 1, 1, 1]
-  s: [-1, -1, -1, -1]
+  w: [30, 30, 30, 30]
+  s: [-30, -30, -30, -30]
   a: [-1, 1, -1, 1]
   d: [1, -1, 1, -1]
   q: [0, 0, 0, 0]
@@ -11,22 +11,18 @@ arm_joint_limits:
     min: 0
     max: 180
   joint_2:
-    default: 90
+    default: 30
     min: 0
     max: 90
   joint_3:
-    default: 90
+    default: 160
     min: 0
     max: 150
   joint_4:
-    default: 90
+    default: 180
     min: 0
     max: 45
   joint_5:
-    default: 90
+    default: 10
     min: 0
     max: 180
-  joint_6:
-    default: 90
-    min: -90
-    max: 90
