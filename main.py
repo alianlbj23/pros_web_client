@@ -10,9 +10,11 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
     QHBoxLayout,
     QMessageBox,
-    QComboBox
+    QComboBox,
 )
 from PyQt5.QtCore import Qt  # 引入 Qt 模塊
+import yaml
+
 
 class IPInputWindow(QWidget):
     def __init__(self):
@@ -21,9 +23,11 @@ class IPInputWindow(QWidget):
         self.slam_active = False
         self.loc_active = False
         self.current_ip = ""
-        self.current_port = 5000        # 預設 port
+        self.current_port = 5000  # 預設 port
         self.selected_lidar = "ydlidar"  # 預設選擇 "lidar"
         self.init_ui()
+        with open("keyboard.yaml", "r") as f:
+            self.key_map = yaml.safe_load(f).get("key_mappings", {})
 
     def init_ui(self):
         self.setWindowTitle("Server Control Panel")
@@ -105,6 +109,24 @@ class IPInputWindow(QWidget):
             key = event.text()
             if key:
                 self.key_label.setText(f"Key Pressed: {key}")
+                # 查找對應的輪速指令
+                if key in self.key_map:
+                    wheel_speed = self.key_map[key]
+                    wheel_str = "_".join(map(str, wheel_speed))
+                    url = f"http://{self.current_ip}:{self.current_port}/wheel/{wheel_str}"
+                    threading.Thread(
+                        target=self.send_wheel_command, args=(url,)
+                    ).start()
+                else:
+                    self.key_label.setText(f"Key '{key}' not mapped.")
+
+    def send_wheel_command(self, url):
+        try:
+            resp = requests.get(url, timeout=2)
+            if resp.status_code != 200:
+                print(f"[WARN] Server response: {resp.status_code} - {resp.text}")
+        except Exception as e:
+            print(f"[ERROR] Failed to send wheel command: {e}")
 
     def update_lidar_selection(self):
         """
@@ -137,15 +159,26 @@ class IPInputWindow(QWidget):
                 resp = requests.get(url, timeout=5)
                 data = resp.json()
                 msg = data.get("message", "")
-                if data.get("status") == "Script execution started" or "already active" in msg or "Containers for 'star_car' already running" in msg:
+                if (
+                    data.get("status") == "Script execution started"
+                    or "already active" in msg
+                    or "Containers for 'star_car' already running" in msg
+                ):
                     # 如果 LIDAR 已經在跑，顯示訊息並進入選單
-                    if "already active" in msg or "Containers for 'star_car' already running" in msg:
-                        QMessageBox.information(self, "Info", "Service is already running.")
+                    if (
+                        "already active" in msg
+                        or "Containers for 'star_car' already running" in msg
+                    ):
+                        QMessageBox.information(
+                            self, "Info", "Service is already running."
+                        )
                     # 連線成功，記下 IP & port
                     self._set_connected(ip, port)
-                    info = ("Connected and services started."
-                            if data.get("status") == "Script execution started"
-                            else "Already connected.")
+                    info = (
+                        "Connected and services started."
+                        if data.get("status") == "Script execution started"
+                        else "Already connected."
+                    )
                     QMessageBox.information(self, "Info", info)
                     # 顯示 LIDAR 選擇框
                     self.lidar_combo.setVisible(True)
@@ -208,7 +241,9 @@ class IPInputWindow(QWidget):
                     self.btn_store_map.setEnabled(False)
                     QMessageBox.information(self, "Info", "Localization started.")
             except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to start localization: {e}")
+                QMessageBox.critical(
+                    self, "Error", f"Failed to start localization: {e}"
+                )
         else:
             self.loc_active = False
             self.btn_loc.setText("Localization")
@@ -237,7 +272,10 @@ class IPInputWindow(QWidget):
             resp = requests.get(url, timeout=5)
             data = resp.json()
             msg = data.get("message", "")
-            if data.get("status") == "Script execution started" or "already active" in msg:
+            if (
+                data.get("status") == "Script execution started"
+                or "already active" in msg
+            ):
                 QMessageBox.information(self, "Info", "Service restarted successfully.")
             else:
                 QMessageBox.warning(self, "Warning", f"Server error: {msg}")
@@ -250,13 +288,19 @@ class IPInputWindow(QWidget):
     # -- stop functions 都帶入 port --
     def _send_slam_stop(self, ip: str, port: int):
         try:
-            requests.get(f"http://{ip}:{port}/run-script/slam_{self.selected_lidar}_stop", timeout=5)
+            requests.get(
+                f"http://{ip}:{port}/run-script/slam_{self.selected_lidar}_stop",
+                timeout=5,
+            )
         except:
             pass
 
     def _send_loc_stop(self, ip: str, port: int):
         try:
-            requests.get(f"http://{ip}:{port}/run-script/localization_{self.selected_lidar}_stop", timeout=5)
+            requests.get(
+                f"http://{ip}:{port}/run-script/localization_{self.selected_lidar}_stop",
+                timeout=5,
+            )
         except:
             pass
 
@@ -321,6 +365,7 @@ class IPInputWindow(QWidget):
             if n < 0 or n > 255:
                 return False
         return True
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
