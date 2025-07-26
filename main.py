@@ -50,31 +50,42 @@ class IPInputWindow(QWidget):
         self.rosbridge_port = 9090  # 可改成你需要的 port
         self.arm_pub = None  # roslibpy.Topic for arm joints
 
-    def _connect_rosbridge(self, ip: str, port: int = 9090, timeout: int = 5):
-        ros = roslibpy.Ros(host=ip, port=port)
-        try:
-            ros.run(timeout=timeout)
-            time.sleep(0.1)  # 等待連線穩定
-            if ros.is_connected:
-                self.ros = ros
-
-                # wheel publisher
-                self.wheel_pub = roslibpy.Topic(
-                    self.ros, "/car_C_rear_wheel", "std_msgs/Float32MultiArray"
+    def _connect_rosbridge(
+        self, ip: str, port: int = 9090, timeout: int = 5, max_retries: int = 5
+    ):
+        for attempt in range(1, max_retries + 1):
+            ros = roslibpy.Ros(host=ip, port=port)
+            try:
+                print(
+                    f"[INFO] Attempting to connect to ROSBridge (try {attempt}/{max_retries})..."
                 )
-                self.wheel_pub.advertise()
+                ros.run(timeout=timeout)
+                if ros.is_connected:
+                    self.ros = ros
 
-                # ★ arm publisher
-                self.arm_pub = roslibpy.Topic(
-                    self.ros, "/robot_arm", "trajectory_msgs/JointTrajectoryPoint"
-                )
-                self.arm_pub.advertise()
+                    # wheel publisher
+                    self.wheel_pub = roslibpy.Topic(
+                        self.ros, "/car_C_rear_wheel", "std_msgs/Float32MultiArray"
+                    )
+                    self.wheel_pub.advertise()
 
-                return True, ""
-            else:
-                return False, "roslibpy connected=False"
-        except Exception as e:
-            return False, str(e)
+                    # ★ arm publisher
+                    self.arm_pub = roslibpy.Topic(
+                        self.ros, "/robot_arm", "trajectory_msgs/JointTrajectoryPoint"
+                    )
+                    self.arm_pub.advertise()
+
+                    print(f"[INFO] Connected to ROSBridge on attempt {attempt}")
+                    return True, ""
+                else:
+                    print("[WARN] roslibpy connected=False")
+
+            except Exception as e:
+                print(f"[ERROR] ROSBridge connection failed on attempt {attempt}: {e}")
+
+            time.sleep(1)  # 每次間隔 1 秒再嘗試
+
+        return False, f"Failed to connect after {max_retries} attempts"
 
     def _disconnect_rosbridge(self):
         if self.wheel_pub:
@@ -321,20 +332,36 @@ class IPInputWindow(QWidget):
             url = f"http://{ip}:{port}/run-script/camera"
             try:
                 resp = requests.get(url, timeout=5)
-                if resp.json().get("status") == "Script execution started":
+                data = resp.json()
+                msg = data.get("message", "")
+
+                if (
+                    data.get("status") == "Script execution started"
+                    or "already active" in msg
+                    or "already running" in msg
+                ):
                     self.camera_active = True
                     self.btn_camera.setText("Close Camera")
+                    self.btn_yolo.setVisible(True)  # 顯示 YOLO 按鈕
                     self.btn_yolo.setEnabled(True)  # 啟用 YOLO 按鈕
-                    QMessageBox.information(self, "Info", "Camera started.")
+
+                    info = (
+                        "Camera started."
+                        if data.get("status") == "Script execution started"
+                        else "Camera already running."
+                    )
+                    QMessageBox.information(self, "Info", info)
                 else:
-                    QMessageBox.warning(self, "Warning", "Failed to start camera.")
+                    QMessageBox.warning(
+                        self, "Warning", f"Failed to start camera: {msg}"
+                    )
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to start camera: {e}")
         else:
             # 關閉 Camera
             self.camera_active = False
             self.btn_camera.setText("Open Camera")
-            self.btn_yolo.setEnabled(False)  # 禁用 YOLO 按鈕
+            self.btn_yolo.setVisible(False)  # 隱藏 YOLO 按鈕
 
             # 如果 YOLO 正在運行，也要關閉它
             if self.yolo_active:
@@ -361,12 +388,25 @@ class IPInputWindow(QWidget):
             url = f"http://{ip}:{port}/run-script/yolo"
             try:
                 resp = requests.get(url, timeout=5)
-                if resp.json().get("status") == "Script execution started":
+                data = resp.json()
+                msg = data.get("message", "")
+
+                if (
+                    data.get("status") == "Script execution started"
+                    or "already active" in msg
+                    or "already running" in msg
+                ):
                     self.yolo_active = True
                     self.btn_yolo.setText("Close YOLO")
-                    QMessageBox.information(self, "Info", "YOLO started.")
+
+                    info = (
+                        "YOLO started."
+                        if data.get("status") == "Script execution started"
+                        else "YOLO already running."
+                    )
+                    QMessageBox.information(self, "Info", info)
                 else:
-                    QMessageBox.warning(self, "Warning", "Failed to start YOLO.")
+                    QMessageBox.warning(self, "Warning", f"Failed to start YOLO: {msg}")
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to start YOLO: {e}")
         else:
@@ -378,6 +418,12 @@ class IPInputWindow(QWidget):
     def _send_yolo_stop(self, ip: str, port: int):
         try:
             requests.get(f"http://{ip}:{port}/run-script/yolo_stop", timeout=5)
+        except:
+            pass
+
+    def _send_camera_stop(self, ip: str, port: int):
+        try:
+            requests.get(f"http://{ip}:{port}/run-script/camera_stop", timeout=5)
         except:
             pass
 
@@ -618,15 +664,21 @@ class IPInputWindow(QWidget):
         self.btn_camera.setVisible(True)
         self.btn_camera.setText("Open Camera")
         self.camera_active = False
-        self.btn_yolo.setVisible(True)  # 顯示 YOLO 按鈕
+        # YOLO 按鈕初始為隱藏，只有 camera 開啟時才顯示
+        self.btn_yolo.setVisible(False)
         self.btn_yolo.setText("Open YOLO")
-        self.btn_yolo.setEnabled(False)  # 但保持禁用狀態
+        self.btn_yolo.setEnabled(False)
         self.yolo_active = False
 
     def _set_disconnected(self):
         self.connected = False
         self.slam_active = False
         self.loc_active = False
+
+        # 保存當前的IP和port以用於停止服務
+        current_ip = self.current_ip
+        current_port = self.current_port
+
         self.ip_edit.clear()
         self.port_edit.clear()
         self.ip_edit.setEnabled(True)
@@ -644,6 +696,20 @@ class IPInputWindow(QWidget):
         self.current_ip = ""
         self.btn_reset_joints.setVisible(False)
         self._disconnect_rosbridge()
+
+        # 如果 YOLO 正在運行，先停止它
+        if self.yolo_active and current_ip:
+            self.yolo_active = False
+            threading.Thread(
+                target=self._send_yolo_stop, args=(current_ip, current_port)
+            ).start()
+
+        # 如果 Camera 正在運行，也要停止它
+        if self.camera_active and current_ip:
+            self.camera_active = False
+            threading.Thread(
+                target=self._send_camera_stop, args=(current_ip, current_port)
+            ).start()
 
         self.btn_camera.setVisible(False)
         self.camera_active = False
