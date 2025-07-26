@@ -1,4 +1,5 @@
 import sys
+import os
 import threading
 import requests
 from PyQt5.QtWidgets import (
@@ -35,8 +36,13 @@ class IPInputWindow(QWidget):
         self.camera_active = False  # 新增 camera 狀態
         self.yolo_active = False  # 新增 YOLO 狀態
 
+        BASE_DIR = os.path.dirname(
+            sys.executable if getattr(sys, "frozen", False) else __file__
+        )
+        yaml_path = os.path.join(BASE_DIR, "keyboard.yaml")
+
         # ✅ 初始化 YAML 中的 key_map 和 joint_limits
-        with open("keyboard.yaml", "r") as f:
+        with open(yaml_path, "r") as f:
             config = yaml.safe_load(f)
             self.key_map = config.get("key_mappings", {})
             self.joint_limits = config.get("arm_joint_limits", {})
