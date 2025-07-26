@@ -33,6 +33,7 @@ class IPInputWindow(QWidget):
         self.selected_lidar = "ydlidar"  # 預設選擇 "lidar"
         self.wheel_pub = None  # roslibpy.Topic for wheel
         self.camera_active = False  # 新增 camera 狀態
+        self.yolo_active = False  # 新增 YOLO 狀態
 
         # ✅ 初始化 YAML 中的 key_map 和 joint_limits
         with open("keyboard.yaml", "r") as f:
@@ -237,6 +238,13 @@ class IPInputWindow(QWidget):
         self.btn_camera.setVisible(False)  # 初始為隱藏
         layout.addWidget(self.btn_camera)
 
+        # YOLO button (新增)
+        self.btn_yolo = QPushButton("Open YOLO", self)
+        self.btn_yolo.clicked.connect(self.on_yolo_click)
+        self.btn_yolo.setVisible(False)  # 初始為隱藏
+        self.btn_yolo.setEnabled(False)  # 初始為禁用
+        layout.addWidget(self.btn_yolo)
+
         layout.addWidget(self.btn_reset)
         layout.addWidget(self.current_ip_label)
         layout.addWidget(self.key_label)
@@ -316,6 +324,7 @@ class IPInputWindow(QWidget):
                 if resp.json().get("status") == "Script execution started":
                     self.camera_active = True
                     self.btn_camera.setText("Close Camera")
+                    self.btn_yolo.setEnabled(True)  # 啟用 YOLO 按鈕
                     QMessageBox.information(self, "Info", "Camera started.")
                 else:
                     QMessageBox.warning(self, "Warning", "Failed to start camera.")
@@ -325,11 +334,50 @@ class IPInputWindow(QWidget):
             # 關閉 Camera
             self.camera_active = False
             self.btn_camera.setText("Open Camera")
+            self.btn_yolo.setEnabled(False)  # 禁用 YOLO 按鈕
+
+            # 如果 YOLO 正在運行，也要關閉它
+            if self.yolo_active:
+                self.yolo_active = False
+                self.btn_yolo.setText("Open YOLO")
+                threading.Thread(target=self._send_yolo_stop, args=(ip, port)).start()
+
             threading.Thread(target=self._send_camera_stop, args=(ip, port)).start()
 
-    def _send_camera_stop(self, ip: str, port: int):
+    def on_yolo_click(self):
+        ip = self.current_ip
+        port = self.current_port
+
+        if not ip:
+            QMessageBox.warning(self, "Warning", "IP not connected.")
+            return
+
+        if not self.camera_active:
+            QMessageBox.warning(self, "Warning", "Camera must be started first.")
+            return
+
+        if not self.yolo_active:
+            # 開啟 YOLO
+            url = f"http://{ip}:{port}/run-script/yolo"
+            try:
+                resp = requests.get(url, timeout=5)
+                if resp.json().get("status") == "Script execution started":
+                    self.yolo_active = True
+                    self.btn_yolo.setText("Close YOLO")
+                    QMessageBox.information(self, "Info", "YOLO started.")
+                else:
+                    QMessageBox.warning(self, "Warning", "Failed to start YOLO.")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to start YOLO: {e}")
+        else:
+            # 關閉 YOLO
+            self.yolo_active = False
+            self.btn_yolo.setText("Open YOLO")
+            threading.Thread(target=self._send_yolo_stop, args=(ip, port)).start()
+
+    def _send_yolo_stop(self, ip: str, port: int):
         try:
-            requests.get(f"http://{ip}:{port}/run-script/camera_stop", timeout=5)
+            requests.get(f"http://{ip}:{port}/run-script/yolo_stop", timeout=5)
         except:
             pass
 
@@ -570,6 +618,10 @@ class IPInputWindow(QWidget):
         self.btn_camera.setVisible(True)
         self.btn_camera.setText("Open Camera")
         self.camera_active = False
+        self.btn_yolo.setVisible(True)  # 顯示 YOLO 按鈕
+        self.btn_yolo.setText("Open YOLO")
+        self.btn_yolo.setEnabled(False)  # 但保持禁用狀態
+        self.yolo_active = False
 
     def _set_disconnected(self):
         self.connected = False
@@ -595,6 +647,8 @@ class IPInputWindow(QWidget):
 
         self.btn_camera.setVisible(False)
         self.camera_active = False
+        self.btn_yolo.setVisible(False)  # 隱藏 YOLO 按鈕
+        self.yolo_active = False
 
     @staticmethod
     def validate_ip(ip: str) -> bool:
