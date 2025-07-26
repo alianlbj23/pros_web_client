@@ -16,38 +16,47 @@ def install_pyinstaller():
 def build_executable():
     system = platform.system()
     arch = platform.machine()
-
     print(f"[INFO] Detected platform: {system} ({arch})")
 
     main_script = "main.py"
+    requirements_file = "requirements.txt"
+
     if not os.path.exists(main_script):
         print("[ERROR] main.py not found.")
         sys.exit(1)
 
-    dist_dir = "dist"
-    build_dir = "build"
-    spec_file = "main.spec"
+    # Step 1: Parse requirements.txt to collect extra options if needed
+    hidden_imports = []
+    if os.path.exists(requirements_file):
+        with open(requirements_file, "r") as f:
+            for line in f:
+                pkg = line.strip()
+                if pkg and not pkg.startswith("#"):
+                    pkg_name = pkg.split("==")[0].split(">")[0].split("<")[0]
+                    hidden_imports.append(f"--collect-all={pkg_name}")
 
-    # Clean up old builds
-    for path in [dist_dir, build_dir, spec_file]:
+    # Step 2: Clean old build
+    for path in ["dist", "build", "main.spec"]:
         if os.path.exists(path):
             if os.path.isfile(path):
                 os.remove(path)
             else:
                 shutil.rmtree(path)
 
+    # Step 3: Assemble command
     cmd = [
         "pyinstaller",
         "--noconfirm",
-        "--onefile",  # 把全部打包成一個檔案
+        "--onefile",
         "--clean",
         main_script,
+        *hidden_imports
     ]
 
     print("[INFO] Running PyInstaller...")
     subprocess.check_call(cmd)
 
-    output_file = os.path.join(dist_dir, "main.exe" if system == "Windows" else "main")
+    output_file = os.path.join("dist", "main.exe" if system == "Windows" else "main")
     print(f"[SUCCESS] Executable generated: {output_file}")
 
 
