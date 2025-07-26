@@ -31,6 +31,7 @@ class IPInputWindow(QWidget):
         self.current_port = 5000  # 預設 port
         self.selected_lidar = "ydlidar"  # 預設選擇 "lidar"
         self.wheel_pub = None  # roslibpy.Topic for wheel
+        self.camera_active = False  # 新增 camera 狀態
 
         # ✅ 初始化 YAML 中的 key_map 和 joint_limits
         with open("keyboard.yaml", "r") as f:
@@ -278,6 +279,12 @@ class IPInputWindow(QWidget):
         layout.addWidget(self.scroll_area)
         layout.addWidget(self.btn_reset_joints)
 
+        # Camera button
+        self.btn_camera = QPushButton("Open Camera", self)
+        self.btn_camera.clicked.connect(self.on_camera_click)
+        self.btn_camera.setVisible(False)  # 初始為隱藏
+        layout.addWidget(self.btn_camera)
+
     def keyPressEvent(self, event):
         if self.connected:
             key = event.text()
@@ -289,6 +296,39 @@ class IPInputWindow(QWidget):
                     self.publish_wheel_speed(wheel_speed)
                 else:
                     self.key_label.setText(f"Key '{key}' not mapped.")
+
+    def on_camera_click(self):
+        ip = self.current_ip
+        port = self.current_port
+
+        if not ip:
+            QMessageBox.warning(self, "Warning", "IP not connected.")
+            return
+
+        if not self.camera_active:
+            # 開啟 Camera
+            url = f"http://{ip}:{port}/run-script/camera"
+            try:
+                resp = requests.get(url, timeout=5)
+                if resp.json().get("status") == "Script execution started":
+                    self.camera_active = True
+                    self.btn_camera.setText("Close Camera")
+                    QMessageBox.information(self, "Info", "Camera started.")
+                else:
+                    QMessageBox.warning(self, "Warning", "Failed to start camera.")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to start camera: {e}")
+        else:
+            # 關閉 Camera
+            self.camera_active = False
+            self.btn_camera.setText("Open Camera")
+            threading.Thread(target=self._send_camera_stop, args=(ip, port)).start()
+
+    def _send_camera_stop(self, ip: str, port: int):
+        try:
+            requests.get(f"http://{ip}:{port}/run-script/camera_stop", timeout=5)
+        except:
+            pass
 
     def send_wheel_command(self, url):
         try:
@@ -524,6 +564,9 @@ class IPInputWindow(QWidget):
         self.lidar_label.setVisible(True)
         self.form_layout_widget.setVisible(True)
         self.btn_reset_joints.setVisible(True)
+        self.btn_camera.setVisible(True)
+        self.btn_camera.setText("Open Camera")
+        self.camera_active = False
 
     def _set_disconnected(self):
         self.connected = False
@@ -546,6 +589,9 @@ class IPInputWindow(QWidget):
         self.current_ip = ""
         self.btn_reset_joints.setVisible(False)
         self._disconnect_rosbridge()
+
+        self.btn_camera.setVisible(False)
+        self.camera_active = False
 
     @staticmethod
     def validate_ip(ip: str) -> bool:
