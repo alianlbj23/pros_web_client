@@ -19,6 +19,7 @@ import yaml
 from PyQt5.QtWidgets import QScrollArea
 import roslibpy  # ← 新增
 import math
+import time
 
 
 class IPInputWindow(QWidget):
@@ -52,6 +53,7 @@ class IPInputWindow(QWidget):
         ros = roslibpy.Ros(host=ip, port=port)
         try:
             ros.run(timeout=timeout)
+            time.sleep(0.1)  # 等待連線穩定
             if ros.is_connected:
                 self.ros = ros
 
@@ -228,6 +230,13 @@ class IPInputWindow(QWidget):
         layout.addWidget(self.btn_slam)
         layout.addWidget(self.btn_store_map)
         layout.addWidget(self.btn_loc)
+
+        # Camera button
+        self.btn_camera = QPushButton("Open Camera", self)
+        self.btn_camera.clicked.connect(self.on_camera_click)
+        self.btn_camera.setVisible(False)  # 初始為隱藏
+        layout.addWidget(self.btn_camera)
+
         layout.addWidget(self.btn_reset)
         layout.addWidget(self.current_ip_label)
         layout.addWidget(self.key_label)
@@ -278,12 +287,6 @@ class IPInputWindow(QWidget):
         self.form_layout_widget.setVisible(False)
         layout.addWidget(self.scroll_area)
         layout.addWidget(self.btn_reset_joints)
-
-        # Camera button
-        self.btn_camera = QPushButton("Open Camera", self)
-        self.btn_camera.clicked.connect(self.on_camera_click)
-        self.btn_camera.setVisible(False)  # 初始為隱藏
-        layout.addWidget(self.btn_camera)
 
     def keyPressEvent(self, event):
         if self.connected:
